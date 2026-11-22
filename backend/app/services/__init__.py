@@ -12,6 +12,7 @@ from app.services.feature_iv import FeatureIvService
 from app.services.feature_snapshot import FeatureSnapshotService
 from app.services.train_pipeline import TrainPipelineService
 from app.services.model_registry import ModelRegistryService
+from app.services.model_release import ModelReleaseService
 from app.services.predict_batch import PredictBatchService
 from app.services.mining_result import MiningResultService
 from app.services.cluster_config import ClusterConfigService
@@ -32,6 +33,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "feature_snapshot": FeatureSnapshotService(),
     "train_pipeline": TrainPipelineService(),
     "model_registry": ModelRegistryService(),
+    "model_release": ModelReleaseService(),
     "predict_batch": PredictBatchService(),
     "mining_result": MiningResultService(),
     "cluster_config": ClusterConfigService(),

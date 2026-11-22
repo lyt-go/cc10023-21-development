@@ -59,6 +59,7 @@ npm run dev
 | 特征重要性分析 | `feature_iv` | 重要性评估 | 评估编号、关联特征、信息值IV |
 | 特征快照管理 | `feature_snapshot` | 特征快照 | 快照编号、特征集、快照日期 |
 | 训练流水线 | `train_pipeline` | 流水线配置 | 流水线编号、流水线名称、特征集 |
+| 模型发布确认 | `model_release` | 训练跑次/发布归档 | 跑次编号、模型版本、模型文件、入模字段、评估回执 |
 | 模型注册中心 | `model_registry` | 模型注册 | 模型编号、模型名称、算法类型 |
 | 批量预测任务 | `predict_batch` | 预测任务 | 任务编号、模型编号、数据切片 |
 | 挖掘结果管理 | `mining_result` | 挖掘结果 | 结果编号、分析主题、算法类型 |
@@ -68,6 +69,34 @@ npm run dev
 | 数据导出管理 | `data_export` | 导出任务 | 任务编号、数据来源、导出范围 |
 | 流水线调度 | `pipeline_schedule` | 调度配置 | 调度编号、关联流水线、Cron表达式 |
 | 业务场景标注 | `scenario_label` | 场景标注 | 标注编号、场景名称、关联特征 |
+
+## 模型发布确认与绑定预测
+
+训练流水线只登记「训练完成」，发布确认补上「按实际训练产物确认发布」这一环，
+把训练评估批次内的模型文件、入模字段与评估回执校验并绑定为可预测模型产物。
+
+状态流转：`待评估 → 待确认 → 已发布`。只有同一跑次同时满足
+**模型文件实际可读**（真实 `open/read`，路径非空或仅存在不算通过）、
+**入模列非空**、**评估回执合格且属于同一跑次** 才能发布；
+评估超时、文件不可读、材料缺失都保持待确认，禁止跨跑次补齐。
+
+专用接口（`backend/app/routers/model_release.py`，领域逻辑在
+`app/services/model_release.py` 与 `app/services/predict_batch.py`）：
+
+| 接口 | 作用 |
+| --- | --- |
+| `POST /api/model-release/runs/accept` | 受理训练跑次，保留受理顺序，重复受理沿用原记录 |
+| `POST /api/model-release/runs/{run_code}/confirm` | 凭完成凭证确认发布；同凭证重复提交只记一次，返回原发布归档 |
+| `GET  /api/model-release/confirmations` | 发布归档（可预测模型产物）列表 |
+| `GET  /api/model-release/versions/{version}/availability` | 注册/预测入口共用的版本可用性结论 |
+| `POST /api/model-release/predict-applications` | 登记预测申请；无产物时等待，发布后重提受理，已受理保留原任务 |
+| `GET  /api/model-release/predict-applications/{code}` | 查询申请及同一版本可用性 |
+| `GET  /api/model-release/predict-tasks/{id}/detail` | 预测详情：实际采用的文件、入模字段、评估回执 |
+
+批量预测任务在创建瞬间固定模型文件、输入列、评估凭证与来源跑次，
+执行与详情沿用这组绑定；同版本后续跑次发布不会顶替已受理任务的绑定。
+端到端叙述场景见 `backend/tests/test_model_release_chain.py` 与
+`backend/tests/http_check_model_release.py`（后者对运行中的服务做 HTTP 核验）。
 
 ## 约定
 

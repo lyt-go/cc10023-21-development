@@ -17,6 +17,83 @@ class PredictBatchService(BaseModuleService):
     ACTION_RULES = {"提交运行": "草稿", "停止预测": "运行中", "确认完成": "已完成"}
     NEGATIVE_ACTIONS = []
 
+    # ── 模型发布确认链路：按已发布可预测产物创建绑定固定的批量预测任务 ──
+    def create_bound_prediction_task(
+        self,
+        *,
+        model_version: str,
+        model_file: str,
+        input_columns: list[str],
+        evaluation_receipt: dict[str, Any],
+        source_run: str,
+        release_code: str,
+        data_slice: str,
+    ) -> dict[str, Any]:
+        """基于已发布产物创建批量预测任务。
+
+        任务创建瞬间把模型文件、输入列、评估凭证、来源跑次和发布归档固定下来，
+        后续执行与详情都沿用这组绑定；缺列、文件、评估只能来自同一跑次的发布产物，
+        本方法不接受任何跨跑次补齐。
+        """
+        missing = []
+        if not str(model_file or "").strip():
+            missing.append("模型文件")
+        if not input_columns:
+            missing.append("入模字段")
+        if not evaluation_receipt or not str(evaluation_receipt.get("receipt_id") or "").strip():
+            missing.append("评估回执")
+        if not str(source_run or "").strip():
+            missing.append("来源跑次")
+        if missing:
+            return {"ok": False, "message": f"发布产物绑定不完整，缺少：{'、'.join(missing)}"}
+
+        rows = store.rows(self.MODULE)
+        next_id = max((int(r.get("id", 0)) for r in rows), default=0) + 1
+        task = {
+            "id": next_id,
+            "status": "等待中",
+            "pending": True,
+            "abnormal": False,
+            "任务编号": f"PRED-{next_id:04d}",
+            "模型编号": model_version,
+            "模型版本": model_version,
+            "数据切片": data_slice,
+            "输出格式": "csv",
+            "分片策略": "round_robin",
+            "并行度": "16",
+            "预测状态": "等待中",
+            "结果校验": "auto_validate",
+            # ── 任务创建后固定的发布产物绑定，执行/详情均沿用，不再改写 ──
+            "绑定模型文件": model_file,
+            "绑定入模字段": list(input_columns),
+            "绑定评估回执": dict(evaluation_receipt),
+            "评估回执编号": evaluation_receipt.get("receipt_id"),
+            "来源跑次": source_run,
+            "发布确认编号": release_code,
+        }
+        rows.append(task)
+        return {"ok": True, "task": task, "task_id": next_id}
+
+    def get_prediction_detail(self, task_id: int) -> dict[str, Any]:
+        """预测详情：展示该次预测实际采用的文件、字段和评估回执（创建时固定的绑定）。"""
+        task = store.find(self.MODULE, task_id)
+        if task is None:
+            return {"ok": False, "message": f"预测任务 {task_id} 不存在"}
+        return {
+            "ok": True,
+            "task_id": task_id,
+            "任务编号": task.get("任务编号"),
+            "预测状态": task.get("预测状态", task.get("status")),
+            "模型版本": task.get("模型版本", task.get("模型编号")),
+            "数据切片": task.get("数据切片"),
+            "来源跑次": task.get("来源跑次"),
+            "发布确认编号": task.get("发布确认编号"),
+            "绑定模型文件": task.get("绑定模型文件"),
+            "绑定入模字段": list(task.get("绑定入模字段", [])),
+            "绑定评估回执": task.get("绑定评估回执"),
+            "评估回执编号": task.get("评估回执编号"),
+        }
+
     # ── 链路4: 批量预测 → 挖掘结果 ──
     def execute_batch_and_collect_result(self, task_id: int) -> dict[str, Any]:
         """执行批量预测任务并将预测结果采集到挖掘结果模块进行深度分析。"""
